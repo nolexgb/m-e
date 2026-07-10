@@ -27,39 +27,74 @@ async function init() {
   $("syncStatus").textContent = "Cargando datos…";
 
   try {
-    projects = await loadCsv(CONFIG.PROJECTS_CSV_URL || CONFIG.SAMPLE_PROJECTS, normalizeProject);
-    dates = await loadCsv(CONFIG.KEY_DATES_CSV_URL || CONFIG.SAMPLE_KEY_DATES, normalizeDate);
+    projects = await loadCsv(CONFIG.PROJECTS_CSV_URL, normalizeProject, CONFIG.SAMPLE_PROJECTS);
+    dates = await loadCsv(CONFIG.KEY_DATES_CSV_URL, normalizeDate, CONFIG.SAMPLE_KEY_DATES);
 
     initMap();
     buildFilters();
     applyFilters();
 
- $("syncStatus").textContent = CONFIG.PROJECTS_CSV_URL
-  ? "Datos sincronizados con Drive"
-  : "Datos cargados correctamente";
-
+    $("syncStatus").textContent = "Datos cargados correctamente";
+    $("syncStatus").classList.remove("error");
     $("syncStatus").classList.add("ok");
   } catch (err) {
     console.error(err);
     $("syncStatus").textContent = "Error al cargar CSV";
+    $("syncStatus").classList.remove("ok");
     $("syncStatus").classList.add("error");
   }
 }
 
-function loadCsv(url, normalizer) {
-  return new Promise((resolve, reject) => {
-    Papa.parse(url, {
-      download: true,
+async function loadCsv(url, normalizer, fallbackUrl = "") {
+  const finalUrl = url || fallbackUrl;
+
+  try {
+    const response = await fetch(finalUrl);
+
+    if (!response.ok) {
+      throw new Error("CSV no disponible");
+    }
+
+    const text = await response.text();
+
+    if (!text || text.toLowerCase().includes("<html")) {
+      throw new Error("La URL no devuelve CSV");
+    }
+
+    const parsed = Papa.parse(text, {
       header: true,
-      skipEmptyLines: true,
-      complete: res => resolve(res.data.map(normalizer).filter(Boolean)),
-      error: reject
+      skipEmptyLines: true
     });
-  });
+
+    return parsed.data.map(normalizer).filter(Boolean);
+  } catch (error) {
+    if (!fallbackUrl || finalUrl === fallbackUrl) {
+      throw error;
+    }
+
+    const response = await fetch(fallbackUrl);
+
+    if (!response.ok) {
+      throw error;
+    }
+
+    const text = await response.text();
+
+    const parsed = Papa.parse(text, {
+      header: true,
+      skipEmptyLines: true
+    });
+
+    return parsed.data.map(normalizer).filter(Boolean);
+  }
 }
 
 function clean(v) {
   return (v ?? "").toString().trim();
+}
+
+function lower(v) {
+  return clean(v).toLowerCase();
 }
 
 function num(v) {
@@ -67,6 +102,7 @@ function num(v) {
 
   const s = String(v)
     .replace(/€/g, "")
+    .replace(/%/g, "")
     .replace(/\s/g, "")
     .replace(/\./g, "")
     .replace(",", ".");
@@ -79,74 +115,130 @@ function pct(v) {
   return n > 1 ? n / 100 : n;
 }
 
+function get(r, keys) {
+  for (const key of keys) {
+    if (r[key] !== undefined && r[key] !== null && r[key] !== "") {
+      return r[key];
+    }
+  }
+
+  return "";
+}
+
 function dateValue(v) {
-  const d = new Date(v);
+  if (!v) return null;
+
+  const raw = clean(v);
+
+  if (!raw) return null;
+
+  const parts = raw.split(/[\/\-]/);
+
+  if (parts.length === 3) {
+    const a = Number(parts[0]);
+    const b = Number(parts[1]);
+    const c = Number(parts[2]);
+
+    if (a > 1900) {
+      const d = new Date(a, b - 1, c);
+      return isNaN(d) ? null : d;
+    }
+
+    if (c > 1900) {
+      const d = new Date(c, b - 1, a);
+      return isNaN(d) ? null : d;
+    }
+  }
+
+  const d = new Date(raw);
   return isNaN(d) ? null : d;
 }
 
 function normalizeProject(r) {
   const p = {
-    code: clean(r.codigo_proyecto),
-    name: clean(r.nombre_proyecto),
-    province: clean(r.provincia),
-    district: clean(r.distrito),
-    sector: clean(r.sector),
-    donor: clean(r.donante),
-    status: clean(r.estado_proyecto),
-    semaforo: clean(r.semaforo_auto),
-    budget: num(r.presupuesto_total),
-    spent: num(r.presupuesto_ejecutado),
-    tech: pct(r.porcentaje_avance_tecnico),
-    fin: pct(r.porcentaje_ejecucion_financiera),
-    beneficiaries: num(r.beneficiarios_alcanzados),
-    dataQuality: pct(r.calidad_datos_auto),
-    lat: Number(r.lat),
-    lng: Number(r.lng),
-    updated: clean(r.fecha_ultima_actualizacion),
-    drive: clean(r.link_carpeta_drive)
+    code: clean(get(r, ["codigo_proyecto", "Código Proyecto", "codigo", "Código", "code"])),
+    name: clean(get(r, ["nombre_proyecto", "Nombre Proyecto", "proyecto", "Proyecto", "name"])),
+    province: clean(get(r, ["provincia", "Provincia"])),
+    district: clean(get(r, ["distrito", "Distrito"])),
+    sector: clean(get(r, ["sector", "Sector"])),
+    donor: clean(get(r, ["donante", "Donante"])),
+    status: clean(get(r, ["estado_proyecto", "Estado Proyecto", "estado", "Estado"])),
+    semaforo: clean(get(r, ["semaforo_auto", "Semáforo Auto", "semaforo", "Semáforo"])),
+    budget: num(get(r, ["presupuesto_total", "Presupuesto Total", "presupuesto", "Presupuesto"])),
+    spent: num(get(r, ["presupuesto_ejecutado", "Presupuesto Ejecutado", "ejecutado", "Ejecutado"])),
+    tech: pct(get(r, ["porcentaje_avance_tecnico", "Porcentaje Avance Técnico", "avance_tecnico", "Avance Técnico"])),
+    fin: pct(get(r, ["porcentaje_ejecucion_financiera", "Porcentaje Ejecución Financiera", "ejecucion_financiera", "Ejecución Financiera"])),
+    beneficiaries: num(get(r, ["beneficiarios_alcanzados", "Beneficiarios Alcanzados", "beneficiarios", "Beneficiarios"])),
+    dataQuality: pct(get(r, ["calidad_datos_auto", "Calidad Datos Auto", "calidad_datos", "Calidad Datos"])),
+    lat: Number(get(r, ["lat", "Lat", "latitude", "Latitude"])),
+    lng: Number(get(r, ["lng", "Lng", "lon", "Lon", "longitude", "Longitude"])),
+    updated: clean(get(r, ["fecha_ultima_actualizacion", "Fecha Última Actualización", "fecha_actualizacion", "Fecha Actualización"])),
+    drive: clean(get(r, ["link_carpeta_drive", "Link Carpeta Drive", "drive", "Drive"]))
   };
 
   if (!p.semaforo) p.semaforo = autoSemaforo(p);
+  if (!p.code) p.code = slug(p.name);
 
   return p.name ? p : null;
 }
 
 function normalizeDate(r) {
-  const deadline = dateValue(r.fecha_limite);
+  const deadline = dateValue(get(r, ["fecha_limite", "Fecha Límite", "fecha", "Fecha"]));
   const today = new Date();
 
   today.setHours(0, 0, 0, 0);
 
-  let days = deadline ? Math.ceil((deadline - today) / (1000 * 60 * 60 * 24)) : "";
-  let alert = clean(r.alerta_fecha_auto);
-  const state = clean(r.estado_hito);
+  const days = deadline ? Math.ceil((deadline - today) / (1000 * 60 * 60 * 24)) : "";
+  let alert = clean(get(r, ["alerta_fecha_auto", "Alerta Fecha Auto", "alerta", "Alerta"]));
+  const state = clean(get(r, ["estado_hito", "Estado Hito", "estado", "Estado"]));
 
   if (!alert) {
-    if (state === "Entregado") alert = "Entregado";
-    else if (days === "") alert = "Sin fecha";
-    else if (days < 0) alert = "Vencido";
-    else if (days <= 7) alert = "0-7 días";
-    else if (days <= 30) alert = "8-30 días";
-    else alert = "Más de 30 días";
+    if (lower(state) === "entregado" || lower(state) === "finalizado" || lower(state) === "cumplido") {
+      alert = "Entregado";
+    } else if (days === "") {
+      alert = "Sin fecha";
+    } else if (days < 0) {
+      alert = "Vencido";
+    } else if (days <= 7) {
+      alert = "0-7 días";
+    } else if (days <= 30) {
+      alert = "8-30 días";
+    } else {
+      alert = "Más de 30 días";
+    }
   }
 
-  return {
-    code: clean(r.codigo_proyecto),
-    project: clean(r.nombre_proyecto),
-    type: clean(r.tipo_hito),
-    description: clean(r.descripcion_hito),
+  const item = {
+    code: clean(get(r, ["codigo_proyecto", "Código Proyecto", "codigo", "Código", "code"])),
+    project: clean(get(r, ["nombre_proyecto", "Nombre Proyecto", "proyecto", "Proyecto", "name"])),
+    type: clean(get(r, ["tipo_hito", "Tipo Hito", "tipo", "Tipo"])),
+    description: clean(get(r, ["descripcion_hito", "Descripción Hito", "descripcion", "Descripción"])),
     deadline,
-    deadlineText: clean(r.fecha_limite),
-    responsible: clean(r.responsable),
+    deadlineText: clean(get(r, ["fecha_limite", "Fecha Límite", "fecha", "Fecha"])),
+    responsible: clean(get(r, ["responsable", "Responsable"])),
     state,
     days,
     alert,
     action: ["Vencido", "0-7 días", "8-30 días"].includes(alert) ? "Sí" : "No",
-    evidence: clean(r.link_evidencia)
+    evidence: clean(get(r, ["link_evidencia", "Link Evidencia", "evidencia", "Evidencia"]))
   };
+
+  if (!item.code) item.code = slug(item.project);
+
+  return item.project || item.type || item.deadlineText ? item : null;
+}
+
+function slug(v) {
+  return clean(v)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function autoSemaforo(p) {
+  if (!p.tech && !p.fin && !p.budget) return "Gris";
   if (p.fin - p.tech > 0.35) return "Naranja";
   if (p.tech < 0.15 && p.fin > 0.5) return "Rojo";
   if (p.tech < 0.35) return "Amarillo";
@@ -163,12 +255,12 @@ function buildFilters() {
   populate(fields.dateAlert, dates.map(d => d.alert));
 
   Object.values(fields).forEach(el => {
-    el.addEventListener("input", applyFilters);
+    if (el) el.addEventListener("input", applyFilters);
   });
 
   $("resetFilters").addEventListener("click", () => {
     Object.values(fields).forEach(el => {
-      el.value = "";
+      if (el) el.value = "";
     });
 
     applyFilters();
@@ -178,6 +270,15 @@ function buildFilters() {
 }
 
 function populate(select, values) {
+  if (!select) return;
+
+  const first = select.querySelector("option");
+  select.innerHTML = "";
+
+  if (first) {
+    select.appendChild(first);
+  }
+
   [...new Set(values.filter(Boolean))].sort().forEach(v => {
     const o = document.createElement("option");
     o.value = v;
@@ -187,10 +288,10 @@ function populate(select, values) {
 }
 
 function applyFilters() {
-  const q = fields.search.value.toLowerCase();
+  const q = lower(fields.search?.value);
 
   filteredProjects = projects.filter(p => {
-    const text = `${p.name} ${p.province} ${p.district} ${p.sector} ${p.donor} ${p.status}`.toLowerCase();
+    const text = `${p.name} ${p.province} ${p.district} ${p.sector} ${p.donor} ${p.status} ${p.semaforo}`.toLowerCase();
 
     return (
       (!q || text.includes(q)) &&
@@ -205,8 +306,13 @@ function applyFilters() {
   const codes = new Set(filteredProjects.map(p => p.code));
 
   filteredDates = dates.filter(d => {
+    const linked =
+      !d.code ||
+      codes.has(d.code) ||
+      filteredProjects.some(p => lower(p.name) === lower(d.project));
+
     return (
-      codes.has(d.code) &&
+      linked &&
       (!fields.milestone.value || d.type === fields.milestone.value) &&
       (!fields.dateAlert.value || d.alert === fields.dateAlert.value)
     );
@@ -267,6 +373,8 @@ function renderKpis() {
 }
 
 function initMap() {
+  if (map) return;
+
   map = L.map("map").setView(CONFIG.MAP_CENTER, CONFIG.MAP_ZOOM);
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -277,6 +385,8 @@ function initMap() {
 }
 
 function renderMap() {
+  if (!markersLayer) return;
+
   markersLayer.clearLayers();
 
   const pts = filteredProjects.filter(p => !isNaN(p.lat) && !isNaN(p.lng));
@@ -313,7 +423,10 @@ function group(data, key, reducer = "count") {
 }
 
 function destroy(name) {
-  if (charts[name]) charts[name].destroy();
+  if (charts[name]) {
+    charts[name].destroy();
+    charts[name] = null;
+  }
 }
 
 function renderCharts() {
@@ -337,7 +450,8 @@ function renderCharts() {
           position: "bottom"
         }
       },
-      responsive: true
+      responsive: true,
+      maintainAspectRatio: false
     }
   });
 
@@ -362,7 +476,8 @@ function renderCharts() {
           display: false
         }
       },
-      responsive: true
+      responsive: true,
+      maintainAspectRatio: false
     }
   });
 
@@ -387,13 +502,15 @@ function renderCharts() {
           display: false
         }
       },
-      responsive: true
+      responsive: true,
+      maintainAspectRatio: false
     }
   });
 }
 
 function badge(text) {
-  return `<span class="badge ${String(text).toLowerCase().replaceAll(" ", "-")}">${text || "Sin dato"}</span>`;
+  const cls = slug(text || "sin-dato");
+  return `<span class="badge ${cls}">${text || "Sin dato"}</span>`;
 }
 
 function renderTables() {
@@ -416,7 +533,11 @@ function renderTables() {
     .join("");
 
   const sortedDates = [...filteredDates]
-    .sort((a, b) => (a.days || 99999) - (b.days || 99999))
+    .sort((a, b) => {
+      const av = typeof a.days === "number" ? a.days : 99999;
+      const bv = typeof b.days === "number" ? b.days : 99999;
+      return av - bv;
+    })
     .slice(0, 50);
 
   $("datesTable").innerHTML = sortedDates
@@ -424,7 +545,7 @@ function renderTables() {
       <tr>
         <td>${d.project}</td>
         <td>${d.type}</td>
-        <td>${fmtDate(d.deadline)}</td>
+        <td>${fmtDate(d.deadline) || d.deadlineText}</td>
         <td>${d.days}</td>
         <td>${badge(d.alert)}</td>
         <td>${d.responsible}</td>
