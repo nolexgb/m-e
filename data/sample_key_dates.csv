@@ -1,0 +1,6 @@
+id_fecha,codigo_proyecto,nombre_proyecto,tipo_hito,descripcion_hito,fecha_limite,responsable,estado_hito,fecha_cumplimiento,dias_restantes,alerta_fecha_auto,requiere_accion,observaciones,link_evidencia
+1,MOZ-001,Salud comunitaria y VIH avanzado,Informe de seguimiento,Informe narrativo y financiero semestral,2026-08-15,Equipo M&E,Pendiente,,,8-30 días,Sí,,https://drive.google.com/
+2,MOZ-001,Salud comunitaria y VIH avanzado,Modificación no sustancial,Fecha límite para ajustes menores sin alterar resultados ni presupuesto global,2026-09-30,Coordinación técnica,Pendiente,,,Más de 30 días,No,,
+3,MOZ-002,Protección infantil en Cabo Delgado,Modificación sustancial,Fecha límite para cambios de resultados presupuesto significativo o plazo contractual,2026-07-30,Dirección país,Pendiente,,,0-7 días,Sí,Revisar con donante,
+4,MOZ-002,Protección infantil en Cabo Delgado,Evaluación intermedia,Evaluación de avance calidad y riesgos,2026-10-15,M&E externo,En curso,,,Más de 30 días,No,,
+5,MOZ-003,Educación y permanencia escolar,Informe final,Entrega de informe final técnico-financiero,2027-09-30,Responsable programas,Pendiente,,,Más de 30 días,No,,
