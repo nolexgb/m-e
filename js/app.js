@@ -21,20 +21,56 @@ const fields = {
   dateAlert: $("dateAlertFilter")
 };
 
+const PROJECT_KEYS = [
+  "codigo_proyecto",
+  "nombre_proyecto",
+  "proyecto",
+  "provincia",
+  "distrito",
+  "sector",
+  "donante",
+  "estado_proyecto",
+  "presupuesto_total",
+  "presupuesto_ejecutado",
+  "porcentaje_avance_tecnico",
+  "porcentaje_ejecucion_financiera",
+  "beneficiarios_alcanzados",
+  "lat",
+  "lng"
+];
+
+const DATE_KEYS = [
+  "codigo_proyecto",
+  "nombre_proyecto",
+  "proyecto",
+  "tipo_hito",
+  "fecha_limite",
+  "responsable",
+  "estado_hito",
+  "alerta_fecha_auto"
+];
+
 init();
 
 async function init() {
   $("syncStatus").textContent = "Cargando datos…";
 
   try {
-    projects = await loadCsv(CONFIG.PROJECTS_CSV_URL, normalizeProject, CONFIG.SAMPLE_PROJECTS);
-    dates = await loadCsv(CONFIG.KEY_DATES_CSV_URL, normalizeDate, CONFIG.SAMPLE_KEY_DATES);
+    projects = await loadCsv(CONFIG.PROJECTS_CSV_URL, normalizeProject, CONFIG.SAMPLE_PROJECTS, PROJECT_KEYS);
+    dates = await loadCsv(CONFIG.KEY_DATES_CSV_URL, normalizeDate, CONFIG.SAMPLE_KEY_DATES, DATE_KEYS);
 
     initMap();
     buildFilters();
     applyFilters();
 
-    $("syncStatus").textContent = "Datos cargados correctamente";
+    if (!projects.length) {
+      $("syncStatus").textContent = "CSV cargado sin proyectos detectados";
+      $("syncStatus").classList.remove("ok");
+      $("syncStatus").classList.add("error");
+      return;
+    }
+
+    $("syncStatus").textContent = `Datos cargados correctamente: ${projects.length} proyectos`;
     $("syncStatus").classList.remove("error");
     $("syncStatus").classList.add("ok");
   } catch (err) {
@@ -45,48 +81,99 @@ async function init() {
   }
 }
 
-async function loadCsv(url, normalizer, fallbackUrl = "") {
+async function loadCsv(url, normalizer, fallbackUrl = "", expectedKeys = []) {
   const finalUrl = url || fallbackUrl;
 
   try {
-    const response = await fetch(finalUrl);
-
-    if (!response.ok) {
-      throw new Error("CSV no disponible");
-    }
-
-    const text = await response.text();
-
-    if (!text || text.toLowerCase().includes("<html")) {
-      throw new Error("La URL no devuelve CSV");
-    }
-
-    const parsed = Papa.parse(text, {
-      header: true,
-      skipEmptyLines: true
-    });
-
-    return parsed.data.map(normalizer).filter(Boolean);
+    const text = await fetchText(finalUrl);
+    return parseSmartCsv(text, normalizer, expectedKeys);
   } catch (error) {
     if (!fallbackUrl || finalUrl === fallbackUrl) {
       throw error;
     }
 
-    const response = await fetch(fallbackUrl);
-
-    if (!response.ok) {
-      throw error;
-    }
-
-    const text = await response.text();
-
-    const parsed = Papa.parse(text, {
-      header: true,
-      skipEmptyLines: true
-    });
-
-    return parsed.data.map(normalizer).filter(Boolean);
+    const text = await fetchText(fallbackUrl);
+    return parseSmartCsv(text, normalizer, expectedKeys);
   }
+}
+
+async function fetchText(url) {
+  const response = await fetch(url, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error("CSV no disponible");
+  }
+
+  const text = await response.text();
+
+  if (!text || text.toLowerCase().includes("<html")) {
+    throw new Error("La URL no devuelve CSV");
+  }
+
+  return text;
+}
+
+function parseSmartCsv(text, normalizer, expectedKeys = []) {
+  const parsed = Papa.parse(text, {
+    skipEmptyLines: false
+  });
+
+  const rows = parsed.data.filter(row => {
+    return row.some(cell => clean(cell) !== "");
+  });
+
+  if (!rows.length) return [];
+
+  const headerIndex = findHeaderRow(rows, expectedKeys);
+  const header = rows[headerIndex].map(normalizeKey);
+  const dataRows = rows.slice(headerIndex + 1);
+
+  return dataRows
+    .map(row => {
+      const obj = {};
+
+      header.forEach((key, i) => {
+        if (key) obj[key] = row[i] ?? "";
+      });
+
+      return obj;
+    })
+    .map(normalizer)
+    .filter(Boolean);
+}
+
+function findHeaderRow(rows, expectedKeys = []) {
+  const normalizedExpected = expectedKeys.map(normalizeKey);
+
+  let bestIndex = 0;
+  let bestScore = -1;
+
+  rows.slice(0, 30).forEach((row, index) => {
+    const normalizedRow = row.map(normalizeKey);
+    const score = normalizedRow.reduce((total, cell) => {
+      return total + (normalizedExpected.includes(cell) ? 1 : 0);
+    }, 0);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  });
+
+  return bestIndex;
+}
+
+function normalizeKey(v) {
+  return clean(v)
+    .replace(/^\uFEFF/, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
 }
 
 function clean(v) {
@@ -116,7 +203,9 @@ function pct(v) {
 }
 
 function get(r, keys) {
-  for (const key of keys) {
+  const normalized = keys.map(normalizeKey);
+
+  for (const key of normalized) {
     if (r[key] !== undefined && r[key] !== null && r[key] !== "") {
       return r[key];
     }
@@ -156,26 +245,27 @@ function dateValue(v) {
 
 function normalizeProject(r) {
   const p = {
-    code: clean(get(r, ["codigo_proyecto", "Código Proyecto", "codigo", "Código", "code"])),
-    name: clean(get(r, ["nombre_proyecto", "Nombre Proyecto", "proyecto", "Proyecto", "name"])),
-    province: clean(get(r, ["provincia", "Provincia"])),
-    district: clean(get(r, ["distrito", "Distrito"])),
-    sector: clean(get(r, ["sector", "Sector"])),
-    donor: clean(get(r, ["donante", "Donante"])),
-    status: clean(get(r, ["estado_proyecto", "Estado Proyecto", "estado", "Estado"])),
-    semaforo: clean(get(r, ["semaforo_auto", "Semáforo Auto", "semaforo", "Semáforo"])),
-    budget: num(get(r, ["presupuesto_total", "Presupuesto Total", "presupuesto", "Presupuesto"])),
-    spent: num(get(r, ["presupuesto_ejecutado", "Presupuesto Ejecutado", "ejecutado", "Ejecutado"])),
-    tech: pct(get(r, ["porcentaje_avance_tecnico", "Porcentaje Avance Técnico", "avance_tecnico", "Avance Técnico"])),
-    fin: pct(get(r, ["porcentaje_ejecucion_financiera", "Porcentaje Ejecución Financiera", "ejecucion_financiera", "Ejecución Financiera"])),
-    beneficiaries: num(get(r, ["beneficiarios_alcanzados", "Beneficiarios Alcanzados", "beneficiarios", "Beneficiarios"])),
-    dataQuality: pct(get(r, ["calidad_datos_auto", "Calidad Datos Auto", "calidad_datos", "Calidad Datos"])),
-    lat: Number(get(r, ["lat", "Lat", "latitude", "Latitude"])),
-    lng: Number(get(r, ["lng", "Lng", "lon", "Lon", "longitude", "Longitude"])),
-    updated: clean(get(r, ["fecha_ultima_actualizacion", "Fecha Última Actualización", "fecha_actualizacion", "Fecha Actualización"])),
-    drive: clean(get(r, ["link_carpeta_drive", "Link Carpeta Drive", "drive", "Drive"]))
+    code: clean(get(r, ["codigo_proyecto", "codigo", "code", "id_registro"])),
+    name: clean(get(r, ["nombre_proyecto", "proyecto", "name", "nombre"])),
+    province: clean(get(r, ["provincia"])),
+    district: clean(get(r, ["distrito"])),
+    sector: clean(get(r, ["sector"])),
+    donor: clean(get(r, ["donante"])),
+    status: clean(get(r, ["estado_proyecto", "estado"])),
+    semaforo: clean(get(r, ["semaforo_auto", "semaforo"])),
+    budget: num(get(r, ["presupuesto_total", "presupuesto"])),
+    spent: num(get(r, ["presupuesto_ejecutado", "ejecutado"])),
+    tech: pct(get(r, ["porcentaje_avance_tecnico", "avance_tecnico"])),
+    fin: pct(get(r, ["porcentaje_ejecucion_financiera", "ejecucion_financiera"])),
+    beneficiaries: num(get(r, ["beneficiarios_alcanzados", "beneficiarios"])),
+    dataQuality: pct(get(r, ["calidad_datos_auto", "calidad_datos"])),
+    lat: Number(get(r, ["lat", "latitude", "latitud"])),
+    lng: Number(get(r, ["lng", "lon", "longitude", "longitud"])),
+    updated: clean(get(r, ["fecha_ultima_actualizacion", "fecha_actualizacion"])),
+    drive: clean(get(r, ["link_carpeta_drive", "drive"]))
   };
 
+  if (!p.name && p.code) p.name = p.code;
   if (!p.semaforo) p.semaforo = autoSemaforo(p);
   if (!p.code) p.code = slug(p.name);
 
@@ -183,17 +273,17 @@ function normalizeProject(r) {
 }
 
 function normalizeDate(r) {
-  const deadline = dateValue(get(r, ["fecha_limite", "Fecha Límite", "fecha", "Fecha"]));
+  const deadline = dateValue(get(r, ["fecha_limite", "fecha"]));
   const today = new Date();
 
   today.setHours(0, 0, 0, 0);
 
   const days = deadline ? Math.ceil((deadline - today) / (1000 * 60 * 60 * 24)) : "";
-  let alert = clean(get(r, ["alerta_fecha_auto", "Alerta Fecha Auto", "alerta", "Alerta"]));
-  const state = clean(get(r, ["estado_hito", "Estado Hito", "estado", "Estado"]));
+  let alert = clean(get(r, ["alerta_fecha_auto", "alerta"]));
+  const state = clean(get(r, ["estado_hito", "estado"]));
 
   if (!alert) {
-    if (lower(state) === "entregado" || lower(state) === "finalizado" || lower(state) === "cumplido") {
+    if (["entregado", "finalizado", "cumplido"].includes(lower(state))) {
       alert = "Entregado";
     } else if (days === "") {
       alert = "Sin fecha";
@@ -209,18 +299,18 @@ function normalizeDate(r) {
   }
 
   const item = {
-    code: clean(get(r, ["codigo_proyecto", "Código Proyecto", "codigo", "Código", "code"])),
-    project: clean(get(r, ["nombre_proyecto", "Nombre Proyecto", "proyecto", "Proyecto", "name"])),
-    type: clean(get(r, ["tipo_hito", "Tipo Hito", "tipo", "Tipo"])),
-    description: clean(get(r, ["descripcion_hito", "Descripción Hito", "descripcion", "Descripción"])),
+    code: clean(get(r, ["codigo_proyecto", "codigo", "code"])),
+    project: clean(get(r, ["nombre_proyecto", "proyecto", "name", "nombre"])),
+    type: clean(get(r, ["tipo_hito", "tipo"])),
+    description: clean(get(r, ["descripcion_hito", "descripcion"])),
     deadline,
-    deadlineText: clean(get(r, ["fecha_limite", "Fecha Límite", "fecha", "Fecha"])),
-    responsible: clean(get(r, ["responsable", "Responsable"])),
+    deadlineText: clean(get(r, ["fecha_limite", "fecha"])),
+    responsible: clean(get(r, ["responsable"])),
     state,
     days,
     alert,
     action: ["Vencido", "0-7 días", "8-30 días"].includes(alert) ? "Sí" : "No",
-    evidence: clean(get(r, ["link_evidencia", "Link Evidencia", "evidencia", "Evidencia"]))
+    evidence: clean(get(r, ["link_evidencia", "evidencia"]))
   };
 
   if (!item.code) item.code = slug(item.project);
