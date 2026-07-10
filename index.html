@@ -172,6 +172,58 @@
     </section>
   </main>
 
+  <div class="project-modal" id="projectModal" aria-hidden="true">
+    <div class="project-modal-backdrop" id="projectModalBackdrop"></div>
+
+    <div class="project-modal-card">
+      <button class="project-modal-close" id="projectModalClose">×</button>
+
+      <div class="project-modal-header">
+        <span id="modalSemaforo" class="badge"></span>
+        <h2 id="modalProjectName"></h2>
+        <p id="modalProjectMeta"></p>
+      </div>
+
+      <div class="project-modal-grid">
+        <div>
+          <span>Presupuesto</span>
+          <strong id="modalBudget"></strong>
+        </div>
+
+        <div>
+          <span>Ejecutado</span>
+          <strong id="modalSpent"></strong>
+        </div>
+
+        <div>
+          <span>Avance técnico</span>
+          <strong id="modalTech"></strong>
+        </div>
+
+        <div>
+          <span>Ejecución financiera</span>
+          <strong id="modalFin"></strong>
+        </div>
+
+        <div>
+          <span>Beneficiarios</span>
+          <strong id="modalBeneficiaries"></strong>
+        </div>
+
+        <div>
+          <span>Última actualización</span>
+          <strong id="modalUpdated"></strong>
+        </div>
+      </div>
+
+      <div class="project-modal-alert" id="modalAlertText"></div>
+
+      <div class="project-modal-actions">
+        <a id="modalDriveLink" href="#" target="_blank" rel="noopener">Abrir carpeta Drive</a>
+      </div>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>
