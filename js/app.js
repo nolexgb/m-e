@@ -34,9 +34,9 @@ async function init() {
     buildFilters();
     applyFilters();
 
-    $("syncStatus").textContent = CONFIG.PROJECTS_CSV_URL
-      ? "Datos sincronizados con Drive"
-      : "Modo demo: conecta Drive en config.js";
+ $("syncStatus").textContent = CONFIG.PROJECTS_CSV_URL
+  ? "Datos sincronizados con Drive"
+  : "Datos cargados correctamente";
 
     $("syncStatus").classList.add("ok");
   } catch (err) {
